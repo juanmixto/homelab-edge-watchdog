@@ -1,0 +1,36 @@
+name: edge-watchdog-keepalive
+
+# GitHub desactiva en silencio los workflows programados (schedule) de un
+# repo sin actividad 60 dias. Este job, aparte y mensual, es la unica
+# escritura del repo: mantiene el repo "vivo" para que el cron de
+# watchdog.yml no se apague solo sin que nadie se entere. Ver README.
+
+on:
+  schedule:
+    - cron: '0 5 1 * *'   # 05:00 UTC el dia 1 de cada mes
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit mensual de latido
+        run: |
+          set -euo pipefail
+          mkdir -p .state
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .state/last_keepalive.txt
+          git config user.name "edge-watchdog-keepalive"
+          git config user.email "actions@users.noreply.github.com"
+          git add .state/last_keepalive.txt
+          if git diff --cached --quiet; then
+            echo "sin cambios que commitear (no deberia pasar)"
+          else
+            git commit -m "keepalive: $(cat .state/last_keepalive.txt)"
+            git push
+          fi

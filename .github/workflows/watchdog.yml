@@ -1,0 +1,40 @@
+name: edge-watchdog
+
+on:
+  schedule:
+    # Cada 10 min. GitHub documenta que el disparo puede retrasarse (jitter,
+    # sobre todo en carga alta); el grace del check de healthchecks.io ya lo
+    # tiene en cuenta (ver README).
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_url:
+        description: >-
+          URL de PRUEBA que sustituye a los 4 dominios reales (ej.
+          https://httpstat.us/403 o https://httpstat.us/200). Vacio = comprobar
+          produccion de verdad.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  actions: read   # para leer el historial de runs y hacer el debounce
+
+concurrency:
+  group: edge-watchdog
+  cancel-in-progress: false   # una ejecucion en curso se respeta, no se cancela a medias
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar los 4 dominios (o la URL de prueba) y avisar via healthchecks.io
+        env:
+          HC_PING_URL: ${{ secrets.HC_PING_URL }}
+          TEST_URL: ${{ github.event.inputs.test_url }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash scripts/check.sh
