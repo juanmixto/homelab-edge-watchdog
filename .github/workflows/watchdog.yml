@@ -27,7 +27,7 @@ on:
       test_url:
         description: >-
           URL de PRUEBA que sustituye a los 4 dominios reales (ej.
-          https://httpstat.us/403 o https://httpstat.us/200). Vacio = comprobar
+          https://httpbin.org/status/403 o https://httpbin.org/status/200). Vacio = comprobar
           produccion de verdad. Una prueba nunca continua la cadena.
         required: false
         default: ''
