@@ -41,7 +41,10 @@ permissions:
   actions: read   # para leer el historial de runs y hacer el debounce
 
 concurrency:
-  group: edge-watchdog
+  # Las pruebas (test_url) van en su propio grupo: si compartieran el de la
+  # cadena, una prueba pendiente podria sustituir (cancelar) un eslabon
+  # pendiente, o un eslabon cancelar la prueba.
+  group: ${{ github.event.inputs.test_url != '' && 'edge-watchdog-prueba' || 'edge-watchdog' }}
   cancel-in-progress: false   # una ejecucion en curso se respeta, no se cancela a medias
 
 jobs:

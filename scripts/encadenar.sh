@@ -2,15 +2,17 @@
 # Dispara el siguiente eslabon de la cadena del vigilante (workflow_dispatch
 # con cadena=true), salvo que ya haya otra ejecucion sin terminar: entonces la
 # cadena sigue por esa (p. ej. un cron resucitador que entro en cola), y asi
-# nunca hay dos cadenas a la vez. Con concurrency: edge-watchdog solo puede
+# nunca hay dos cadenas a la vez. Las pruebas (run-name "PRUEBA ...") no
+# cuentan: nunca continuan la cadena. Con concurrency: edge-watchdog solo puede
 # haber una ejecucion en curso y otra pendiente, asi que no hay carrera.
 set -uo pipefail
 
 : "${GH_TOKEN:?}" "${GITHUB_REPOSITORY:?}" "${GITHUB_RUN_ID:?}" "${REF:?}"
 
 otros="$(gh run list --workflow watchdog.yml --repo "$GITHUB_REPOSITORY" --limit 30 \
-  --json databaseId,status \
-  --jq '[.[] | select(.databaseId != '"$GITHUB_RUN_ID"') | select(.status != "completed")] | length')" \
+  --json databaseId,status,displayTitle \
+  --jq '[.[] | select(.databaseId != '"$GITHUB_RUN_ID"') | select(.status != "completed")
+         | select(.displayTitle | startswith("PRUEBA") | not)] | length')" \
   || otros="error"
 
 if [ "$otros" = "error" ]; then
