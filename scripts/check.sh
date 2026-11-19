@@ -72,12 +72,20 @@ echo "CAIDA detectada: ${detail[*]}"
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_RUN_ID:?}"
 
+# Las pruebas (run-name "PRUEBA ...") solo se comparan con pruebas, y las
+# reales solo con reales: una prueba en rojo no adelanta el aviso de una
+# caida real, ni al reves. Las canceladas no cuentan como "la anterior".
+if [ -n "${TEST_URL:-}" ]; then
+  filtro_prueba='startswith("PRUEBA")'
+else
+  filtro_prueba='startswith("PRUEBA") | not'
+fi
 prev_conclusion="$(gh run list \
   --workflow watchdog.yml \
   --repo "$GITHUB_REPOSITORY" \
-  --limit 20 \
-  --json databaseId,conclusion,status,createdAt \
-  --jq '[.[] | select(.status=="completed") | select(.databaseId != '"$GITHUB_RUN_ID"')] | sort_by(.createdAt) | last | .conclusion // "ninguna"' \
+  --limit 30 \
+  --json databaseId,conclusion,status,createdAt,displayTitle \
+  --jq '[.[] | select(.status=="completed") | select(.conclusion=="success" or .conclusion=="failure") | select(.displayTitle | '"$filtro_prueba"') | select(.databaseId != '"$GITHUB_RUN_ID"')] | sort_by(.createdAt) | last | .conclusion // "ninguna"' \
   2>&1)" || prev_conclusion="error_consultando_historial"
 
 echo "Conclusion de la ejecucion completada anterior: $prev_conclusion"
@@ -87,7 +95,7 @@ if [ "$prev_conclusion" = "failure" ]; then
   curl -fsS -m 10 "${HC_PING_URL}/fail" -o /dev/null
 else
   echo "Primera ejecucion en fallo (o sin historial previo valido): NO se avisa todavia."
-  echo "Si en la siguiente pasada (10 min) persiste, se confirmara entonces."
+  echo "Si en la siguiente pasada (~10 min, siguiente eslabon) persiste, se confirmara entonces."
 fi
 
 # El run queda en rojo en la pestana Actions a proposito: es la MEMORIA del

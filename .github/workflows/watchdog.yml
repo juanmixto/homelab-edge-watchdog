@@ -1,31 +1,66 @@
 name: edge-watchdog
 
+# Ritmo real: una CADENA que se dispara a si misma (ver README, "Por que una
+# cadena y no el cron"). Medido del 13 al 19-nov-2026: el cron '*/10' de este
+# repo publico solo se ejecutaba 3-5 veces al dia (huecos de 4-10 h), asi que
+# el cron queda solo como RESUCITADOR de la cadena si se rompe.
+#
+#   ejecucion N:  [espera 9 min en el entorno espera-cadena, sin runner]
+#                 -> check (los 4 dominios)
+#                 -> siguiente: workflow_dispatch(cadena=true) de la N+1
+#
+# Lo permite una excepcion documentada de GitHub: los eventos que crea el
+# GITHUB_TOKEN no lanzan workflows, SALVO workflow_dispatch y
+# repository_dispatch. No hace falta ningun token personal.
+
+run-name: >-
+  ${{ github.event.inputs.test_url != '' && format('PRUEBA {0}', github.event.inputs.test_url)
+  || (github.event.inputs.cadena == 'true' && 'cadena' || github.event_name) }}
+
 on:
   schedule:
-    # Cada 10 min. GitHub documenta que el disparo puede retrasarse (jitter,
-    # sobre todo en carga alta); el grace del check de healthchecks.io ya lo
-    # tiene en cuenta (ver README).
+    # Resucitador: GitHub lo retrasa o descarta casi siempre en repos publicos,
+    # pero basta con que entre de vez en cuando para rearrancar la cadena.
     - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       test_url:
         description: >-
           URL de PRUEBA que sustituye a los 4 dominios reales (ej.
-          https://httpstat.us/403 o https://httpstat.us/200). Vacio = comprobar
-          produccion de verdad.
+          https://httpbin.org/status/403 o https://httpbin.org/status/200). Vacio = comprobar
+          produccion de verdad. Una prueba nunca continua la cadena.
         required: false
         default: ''
+      cadena:
+        description: 'Uso interno: true = eslabon de la cadena (espera 9 min antes de comprobar).'
+        required: false
+        default: 'false'
 
 permissions:
   contents: read
   actions: read   # para leer el historial de runs y hacer el debounce
 
 concurrency:
-  group: edge-watchdog
+  # Las pruebas (test_url) van en su propio grupo: si compartieran el de la
+  # cadena, una prueba pendiente podria sustituir (cancelar) un eslabon
+  # pendiente, o un eslabon cancelar la prueba.
+  group: ${{ github.event.inputs.test_url != '' && 'edge-watchdog-prueba' || 'edge-watchdog' }}
   cancel-in-progress: false   # una ejecucion en curso se respeta, no se cancela a medias
 
 jobs:
+  espera:
+    # El entorno espera-cadena tiene un wait_timer de 9 min: GitHub retiene el
+    # job sin ocupar runner. Solo para los eslabones de la cadena.
+    if: github.event.inputs.cadena == 'true' && github.event.inputs.test_url == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: espera-cadena
+    steps:
+      - run: echo "fin de la espera del eslabon"
+
   check:
+    needs: espera
+    if: ${{ !cancelled() && (needs.espera.result == 'success' || needs.espera.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -38,3 +73,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: bash scripts/check.sh
+
+  siguiente:
+    # Encadena el siguiente eslabon pase lo que pase en el check (un dominio
+    # caido NO debe parar la vigilancia). continue-on-error: un fallo aqui no
+    # pone el run en rojo, que es la memoria del debounce de check.sh.
+    needs: check
+    if: ${{ always() && github.event.inputs.test_url == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disparar el siguiente eslabon (si no hay ya uno en cola)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        run: bash scripts/encadenar.sh
